@@ -8,7 +8,7 @@ SOS = 0
 
 class EncoderRNN(nn.Module):
     def __init__(self, input_size, hidden_size, output_size,
-                 n_layers=1, dropout_p=0.1, use_cuda=True):
+                 n_layers=1, dropout=0.2, use_cuda=True):
         super(EncoderRNN, self).__init__()
         self.input_size = input_size
         self.hidden_size = hidden_size
@@ -17,7 +17,7 @@ class EncoderRNN(nn.Module):
         self.use_cuda = use_cuda
         self.embed = nn.Embedding(input_size, hidden_size)
         self.gru = nn.GRU(hidden_size, hidden_size, n_layers,
-                          dropout=dropout_p, bidirectional=True)
+                          dropout=dropout, bidirectional=True)
         self.o2p = nn.Linear(hidden_size, output_size * 2)
 
     def sample(self, mu, logvar):
@@ -49,7 +49,7 @@ class DecoderRNN(nn.Module):
     Decode from z into sequence using RNN
     """
     def __init__(self, input_size, hidden_size, output_size,
-                 n_layers=1, dropout_p=0.1, use_cuda=True):
+                 n_layers=1, dropout=0.1, use_cuda=True):
         super(DecoderRNN, self).__init__()
         self.input_size = input_size
         self.hidden_size = hidden_size
@@ -58,10 +58,10 @@ class DecoderRNN(nn.Module):
         self.use_cuda = use_cuda
 
         self.embed = nn.Embedding(output_size, hidden_size)
-        self.dropout = nn.Dropout(dropout_p)
+        self.dropout = nn.Dropout(dropout)
         self.z2h = nn.Linear(input_size, hidden_size)
         self.gru = nn.GRU(hidden_size + input_size, hidden_size, n_layers,
-                          dropout=dropout_p)
+                          dropout=dropout)
         self.i2h = nn.Linear(hidden_size + input_size, hidden_size)
         self.h2o = nn.Linear(hidden_size * 2, hidden_size)
         self.out = nn.Linear(hidden_size + input_size, output_size)
