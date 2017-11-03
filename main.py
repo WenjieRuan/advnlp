@@ -8,7 +8,7 @@ import torch.nn.functional as F
 from torch.autograd import Variable
 from torch import optim
 from torchtext import data, datasets
-from language_model.model import RNNModel
+from language_model import RNNModel
 from classifiers import ConvText
 
 
@@ -33,14 +33,13 @@ def repackage_hidden(h):
         return tuple(repackage_hidden(v) for v in h)
 
 
-def evaluate(classifier, generator, val_iter, TEXT, use_cuda=True, args=None):
+def evaluate(classifier, generator, val_iter, beta, TEXT, use_cuda=True, args=None):
     classifier.eval()
     generator.eval()
     avg_loss, avg_loss_x, avg_loss_y = 0, 0, 0
     corrects_t, corrects_f = 0, 0
     vocab_size = len(TEXT.vocab)
 
-    beta = 1.0
     hidden = generator.init_hidden(val_iter.batch_size)
     for b, batch in enumerate(val_iter):
         text, label = batch.text, batch.label
@@ -72,11 +71,11 @@ def evaluate(classifier, generator, val_iter, TEXT, use_cuda=True, args=None):
     return avg_loss, avg_loss_x, avg_loss_y, accuracy_t, accuracy_f
 
 
-def train(classifier, generator, generator_op, train_iter, TEXT, use_cuda=True, args=None):
+def train(classifier, generator, generator_op, train_iter, beta, TEXT, use_cuda=True, args=None):
     classifier.eval()
     generator.train()
-    total_loss = 0
-    beta = 1.
+    total_loss, total_loss_x, total_loss_y = 0, 0, 0
+    corrects_t, corrects_f = 0, 0
     vocab_size = len(TEXT.vocab)
 
     hidden = generator.init_hidden(train_iter.batch_size)
@@ -98,25 +97,31 @@ def train(classifier, generator, generator_op, train_iter, TEXT, use_cuda=True, 
         loss_y = F.cross_entropy(y_f, target)
         loss = beta * loss_x + loss_y
 
+
         loss.backward()
         nn.utils.clip_grad_norm(generator.parameters(), args.grad_clip)
         generator_op.step()
 
-        corrects_t = (torch.max(y_t, 1)[1].view(label.size()).data == label.data).sum()
-        accuracy_t = 100.0 * corrects_t / batch.batch_size
-        corrects_f = (torch.max(y_f, 1)[1].view(label.size()).data == label.data).sum()
-        accuracy_f = 100.0 * corrects_f / batch.batch_size
-        if b % 50 == 0:
-            sys.stdout.write('\r[%d] [loss] %.3f | loss_x: %.3f | loss_y: %.3f | accuracy_t:%.2f | accuracy_f:%.2f | beta: %.2f'
-                         % (b, loss.data[0], loss_x.data[0], loss_y.data[0], accuracy_t, accuracy_f, beta))
+        corrects_t += (torch.max(y_t, 1)[1].view(label.size()).data == label.data).sum()
+        corrects_f += (torch.max(y_f, 1)[1].view(label.size()).data == label.data).sum()
         total_loss += loss.data[0]
+        total_loss_x += loss_x.data[0]
+        total_loss_y += loss_y.data[0]
         if b % 500 == 0 and b != 0:
-            total_loss = total_loss / 500
-            print("\nBatch[%d] loss:%5.2f | pp:%5.2f " % (b, total_loss, math.exp(total_loss)))
-            total_loss = 0
+            total_loss, total_loss_x, total_loss_y = total_loss/500, total_loss_x/500, total_loss_y/500
+            accuracy_t = 100.0 * corrects_t / (500 * train_iter.batch_size)
+            accuracy_f = 100.0 * corrects_f / (500 * train_iter.batch_size)
+            log = '[{}] [loss] {:.3f} | loss_x:{:.3f} | x_pp:{:.3f} | loss_y:{:.3f} | accuracy_t:{:.3f} | accuracy_f:{:.3f} | beta:{:.3f}'.format(b, total_loss, total_loss_x, math.exp(total_loss_x), total_loss_y, accuracy_t, accuracy_f, beta)
+            print(log)
+            total_loss, total_loss_x, total_loss_y = 0, 0, 0
+            corrects_f, corrects_t = 0, 0
             _, sample = generated.data.cpu()[:,0,:].topk(1)
-            print("[ORI %2.2f]: " % accuracy_t, " ".join([TEXT.vocab.itos[i] for i in text.data[:,0]]))
-            print("[GEN %2.2f]: " % accuracy_f, " ".join([TEXT.vocab.itos[i] for i in sample.squeeze()]))
+            text_sample = " ".join([TEXT.vocab.itos[i] for i in text.data[:,0]])
+            generated_sample = " ".join([TEXT.vocab.itos[i] for i in sample.squeeze()])
+            with open("./temp/log.txt", "a+") as f:
+                f.write("\n" + log + "\n")
+                f.write("[ORI]: %s\n" % (text_sample))
+                f.write("[GEN]: %s\n" % (generated_sample))
 
 
 def main():
@@ -146,13 +151,16 @@ def main():
         generator.cuda()
 
     best_val_loss = None
+    beta = 1.0
     for e in range(1, args.epochs+1):
-        train(classifier, generator, generator_op, train_iter, TEXT, use_cuda, args)
-        stats = evaluate(classifier, generator, test_iter, TEXT, use_cuda, args)
+        train(classifier, generator, generator_op, train_iter, beta, TEXT, use_cuda, args)
+        stats = evaluate(classifier, generator, test_iter, beta, TEXT, use_cuda, args)
         val_loss, val_loss_x, val_loss_y, val_accuracy_t, val_accuracy_f = stats
         print("\n[Epoch: %d] val_loss:%5.2f | val_pp:%.2f | loss_x:%.2f | loss_y:%.2f | accuracy_t:%.2f | accuracy_f:%.2f "
                % (e, val_loss, math.exp(val_loss), val_loss_x, val_loss_y, val_accuracy_t, val_accuracy_f))
 
+        if beta > 0.5:
+            beta *= .8
         # Save the model if the validation loss is the best we've seen so far.
         if not best_val_loss or val_loss < best_val_loss:
             print("[!] saving model")
