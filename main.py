@@ -143,7 +143,7 @@ def main():
     print("[!] Instantiating models...")
     classifier = ConvText(vocab_size=vocab_size, embed_size=128, n_classes=2)
     classifier.load_state_dict(torch.load("./classifiers/snapshot/cnn_5_128.pt"))
-    generator = RNNModel('LSTM', ntoken=vocab_size, ninp=128, nhid=128, nlayers=2, dropout=0.4)
+    generator = RNNModel('LSTM', ntoken=vocab_size, ninp=256, nhid=256, nlayers=2, dropout=0.5)
     generator_op = optim.Adam(generator.parameters(), lr=args.lr)
     if use_cuda:
         print("[!] Using CUDA...")
@@ -159,8 +159,8 @@ def main():
         print("\n[Epoch: %d] val_loss:%5.2f | val_pp:%.2f | loss_x:%.2f | loss_y:%.2f | accuracy_t:%.2f | accuracy_f:%.2f "
                % (e, val_loss, math.exp(val_loss), val_loss_x, val_loss_y, val_accuracy_t, val_accuracy_f))
 
-        if beta > 0.5:
-            beta *= .8
+        if beta > 0.2:
+            beta *= .9
         # Save the model if the validation loss is the best we've seen so far.
         if not best_val_loss or val_loss < best_val_loss:
             print("[!] saving model")
